@@ -141,6 +141,8 @@ html, body, [class*="css"], .stApp {
     font-family: 'DM Sans', sans-serif !important;
     padding: 0.6rem 1rem !important;
     background: white !important;
+    color: #1A1A1A !important;
+-webkit-text-fill-color: #1A1A1A !important;
 }
 .stTextInput > div > div > input:focus {
     border-color: var(--sage) !important;
