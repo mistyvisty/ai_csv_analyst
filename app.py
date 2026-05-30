@@ -226,9 +226,17 @@ if st.session_state.df is not None:
         ]
         cols = st.columns(4)
         for i, (col, sug) in enumerate(zip(cols, suggestions)):
-            with col:
-                if st.button(sug, key=f"sug_{i}", use_container_width=True):
-                    st.session_state.pending_question = sug
+    with col:
+        if st.button(sug, key=f"sug_{i}", use_container_width=True):
+            st.session_state.messages.append({"role": "user", "content": sug})
+            api_messages = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
+            with st.spinner("🌿 Analysing..."):
+                try:
+                    response = call_groq(api_messages, st.session_state.df_summary, API_KEY)
+                    st.session_state.messages.append({"role": "assistant", "content": response})
+                except Exception as e:
+                    st.error(f"Error: {e}")
+            st.rerun()
 
         st.markdown("---")
 
