@@ -59,49 +59,49 @@ if "df" not in st.session_state:
 if "df_summary" not in st.session_state:
     st.session_state.df_summary = None
 
+# ── SLIM summary — keeps token count well under 1000 ──────────────────
 def build_df_summary(df):
     summary = {}
     summary["shape"] = {"rows": int(df.shape[0]), "cols": int(df.shape[1])}
     summary["columns"] = list(df.columns)
-    summary["dtypes"] = {col: str(df[col].dtype) for col in df.columns}
-    summary["nulls"] = {col: int(df[col].isnull().sum()) for col in df.columns}
-    summary["numeric_stats"] = {}
+
+    num_stats = {}
     for col in df.select_dtypes(include="number").columns:
-        summary["numeric_stats"][col] = {
-            "mean": round(float(df[col].mean()), 3),
-            "median": round(float(df[col].median()), 3),
-            "min": round(float(df[col].min()), 3),
-            "max": round(float(df[col].max()), 3),
-            "std": round(float(df[col].std()), 3),
+        num_stats[col] = {
+            "min": round(float(df[col].min()), 2),
+            "max": round(float(df[col].max()), 2),
+            "mean": round(float(df[col].mean()), 2),
         }
-    summary["categorical_stats"] = {}
+    summary["numeric_stats"] = num_stats
+
+    cat_stats = {}
     for col in df.select_dtypes(include=["object", "category"]).columns:
-        vc = df[col].value_counts()
-        summary["categorical_stats"][col] = {
+        top3 = df[col].value_counts().head(3).to_dict()
+        cat_stats[col] = {
             "unique": int(df[col].nunique()),
-            "top_values": {str(k): int(v) for k, v in vc.head(5).items()}
+            "top3": {str(k): int(v) for k, v in top3.items()}
         }
-    summary["sample"] = df.head(5).to_dict(orient="records")
+    summary["categorical_stats"] = cat_stats
+
+    # Only 2 sample rows to save tokens
+    summary["sample"] = df.head(2).to_dict(orient="records")
     return summary
 
 def call_groq(messages_history, df_summary, api_key):
-    system_prompt = f"""You are an expert data analyst AI. The user uploaded a CSV dataset.
+    # Compact one-line JSON to save tokens
+    summary_str = json.dumps(df_summary, separators=(',', ':'), default=str)
 
-DATASET SUMMARY:
-{json.dumps(df_summary, indent=2, default=str)}
-
-Your job:
-1. Answer questions about this data clearly and insightfully
-2. When asked for a chart, respond with a JSON block like:
-```chart
-{{"type": "bar", "x": "column_name", "y": "column_name", "title": "Chart title"}}
-```
-3. Be concise but insightful. Use bullet points for multiple insights.
-4. Only use columns that exist in the dataset. Never make up data."""
+    system_prompt = (
+        "You are an expert data analyst. Dataset summary (JSON):\n"
+        + summary_str
+        + "\n\nAnswer questions clearly. Use bullets for multiple points. "
+        "For charts reply with a ```chart {\"type\":\"bar\",\"x\":\"col\",\"y\":\"col\",\"title\":\"...\"}``` block. "
+        "Only use columns that exist in the data."
+    )
 
     payload = {
         "model": "llama-3.1-8b-instant",
-        "max_tokens": 1000,
+        "max_tokens": 512,
         "messages": [
             {"role": "system", "content": system_prompt},
             *messages_history
@@ -111,14 +111,11 @@ Your job:
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_key}"
     }
-
-    # ── DEBUG: show exactly what URL and status we get ──
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    st.write(f"🔧 DEBUG — calling: `{url}`")
-    resp = requests.post(url, json=payload, headers=headers, timeout=30)
-    st.write(f"🔧 DEBUG — status: `{resp.status_code}`")
+    resp = requests.post(
+        "https://api.groq.com/openai/v1/chat/completions",
+        json=payload, headers=headers, timeout=30
+    )
     if resp.status_code != 200:
-        st.write(f"🔧 DEBUG — error body: `{resp.text[:500]}`")
         raise Exception(f"API error {resp.status_code}: {resp.text[:300]}")
     return resp.json()["choices"][0]["message"]["content"]
 
@@ -194,11 +191,8 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ── DEBUG: show key status at top ──────────────────────────────────────
-if API_KEY:
-    st.success(f"✅ API key loaded — starts with: `{API_KEY[:8]}...`")
-else:
-    st.error("❌ GROQ_API_KEY not found in secrets!")
+if not API_KEY:
+    st.error("⚠️ No API key found. Please add GROQ_API_KEY to your Streamlit secrets.")
     st.stop()
 
 uploaded = st.file_uploader("Drop your CSV here", type=["csv"], label_visibility="collapsed")
