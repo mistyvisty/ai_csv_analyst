@@ -48,7 +48,7 @@ html,body,[class*="css"],.stApp { background-color:var(--cream)!important; font-
 def get_api_key():
     try:
         return st.secrets["GROQ_API_KEY"]
-    except:
+    except Exception:
         return None
 
 API_KEY = get_api_key()
@@ -116,7 +116,7 @@ Your job:
         "Authorization": f"Bearer {api_key}"
     }
     resp = requests.post(
-        "https://api.groq.com/openai/v1/chat/completions",
+        "https://api.groqcloud.com/openai/v1/chat/completions",
         json=payload, headers=headers, timeout=30
     )
     if resp.status_code != 200:
@@ -124,6 +124,7 @@ Your job:
     return resp.json()["choices"][0]["message"]["content"]
 
 # ── Helper: send a question ────────────────────────────────────────────
+# FIX: st.rerun() is now OUTSIDE the spinner so the response is saved first
 def send_question(question):
     st.session_state.messages.append({"role": "user", "content": question})
     api_messages = [{"role": m["role"], "content": m["content"]}
@@ -133,8 +134,11 @@ def send_question(question):
             response = call_groq(api_messages, st.session_state.df_summary, API_KEY)
             st.session_state.messages.append({"role": "assistant", "content": response})
         except Exception as e:
-            st.error(f"Error: {e}")
-    st.rerun()
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": f"⚠️ Error: {e}"
+            })
+    st.rerun()  # ← moved outside the spinner block
 
 # ── Render chart ───────────────────────────────────────────────────────
 def render_chart(df, chart_json_str):
@@ -173,7 +177,7 @@ def render_chart(df, chart_json_str):
         ax.tick_params(colors='#6B8F71', labelsize=9)
         plt.tight_layout()
         return fig
-    except:
+    except Exception:
         return None
 
 def parse_response(text):
@@ -228,7 +232,6 @@ if st.session_state.df is not None:
     tab1, tab2, tab3 = st.tabs(["💬 Chat with your data", "🔍 Data preview", "📊 Quick charts"])
 
     with tab1:
-        # ── Suggestion buttons — one click sends instantly ─────────────
         st.markdown("**Try asking:**")
         suggestions = [
             "What are the key insights from this data?",
@@ -244,7 +247,6 @@ if st.session_state.df is not None:
 
         st.markdown("---")
 
-        # ── Chat history ───────────────────────────────────────────────
         for msg in st.session_state.messages:
             if msg["role"] == "user":
                 st.markdown(f'<div class="msg-user">{msg["content"]}</div>', unsafe_allow_html=True)
@@ -257,7 +259,6 @@ if st.session_state.df is not None:
                         st.pyplot(fig, use_container_width=True)
                         plt.close()
 
-        # ── Text input + Send ──────────────────────────────────────────
         question = st.text_input(
             "Ask anything about your data...",
             placeholder="e.g. What are the top 5 categories by revenue?",
