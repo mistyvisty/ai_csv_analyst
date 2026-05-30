@@ -216,7 +216,8 @@ if "df" not in st.session_state:
 if "df_summary" not in st.session_state:
     st.session_state.df_summary = None
 if "api_key" not in st.session_state:
-    st.session_state.api_key = ""
+    import os
+    st.session_state.api_key = st.secrets.get("GROQ_API_KEY", "") if hasattr(st, "secrets") else ""
 
 # â”€â”€ Helper: build data summary for LLM context â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def build_df_summary(df):
@@ -364,16 +365,13 @@ st.markdown("""
 
 # â”€â”€ Sidebar: API key â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 with st.sidebar:
-    st.markdown("### ðŸ”‘ API Key")
-    api_key = st.text_input("Groq API Key", type="password",
-                             value=st.session_state.api_key,
-                             placeholder="gsk_...")
-    if api_key:
-        st.session_state.api_key = api_key
-        st.success("Key saved âœ“")
-    st.markdown("---")
     st.markdown("**Built by [Preeti Bhardwaj](https://mistyvisty.github.io)**")
-    st.markdown("ðŸŒ¿ Powered by Claude + Streamlit")
+    st.markdown("ðŸŒ¿ Powered by Groq LLaMA + Streamlit")
+    if not st.session_state.api_key:
+        api_key = st.text_input("Groq API Key", type="password", placeholder="gsk_...")
+        if api_key:
+            st.session_state.api_key = api_key
+            st.success("Key saved âœ“")
 
 # â”€â”€ File upload â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 uploaded = st.file_uploader("Drop your CSV here", type=["csv"],
