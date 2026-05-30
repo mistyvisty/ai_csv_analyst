@@ -3,7 +3,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('Agg')
-import io
 import json
 import requests
 import warnings
@@ -45,7 +44,7 @@ html,body,[class*="css"],.stApp { background-color:var(--cream)!important; font-
 </style>
 """, unsafe_allow_html=True)
 
-# ── Load API key from Streamlit secrets ────────────────────────────────
+# ── API key from secrets ───────────────────────────────────────────────
 def get_api_key():
     try:
         return st.secrets["GROQ_API_KEY"]
@@ -124,6 +123,19 @@ Your job:
         raise Exception(f"API error {resp.status_code}: {resp.text[:300]}")
     return resp.json()["choices"][0]["message"]["content"]
 
+# ── Helper: send a question ────────────────────────────────────────────
+def send_question(question):
+    st.session_state.messages.append({"role": "user", "content": question})
+    api_messages = [{"role": m["role"], "content": m["content"]}
+                    for m in st.session_state.messages]
+    with st.spinner("🌿 Analysing..."):
+        try:
+            response = call_groq(api_messages, st.session_state.df_summary, API_KEY)
+            st.session_state.messages.append({"role": "assistant", "content": response})
+        except Exception as e:
+            st.error(f"Error: {e}")
+    st.rerun()
+
 # ── Render chart ───────────────────────────────────────────────────────
 def render_chart(df, chart_json_str):
     try:
@@ -182,7 +194,6 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Show warning if no API key found
 if not API_KEY:
     st.error("⚠️ No API key found. Please add GROQ_API_KEY to your Streamlit secrets.")
     st.stop()
@@ -195,6 +206,7 @@ if uploaded:
         df = pd.read_csv(uploaded, encoding='latin1')
         st.session_state.df = df
         st.session_state.df_summary = build_df_summary(df)
+        st.session_state.messages = []
     except Exception as e:
         st.error(f"Could not read CSV: {e}")
 
@@ -216,7 +228,7 @@ if st.session_state.df is not None:
     tab1, tab2, tab3 = st.tabs(["💬 Chat with your data", "🔍 Data preview", "📊 Quick charts"])
 
     with tab1:
-        # Suggested questions
+        # ── Suggestion buttons — one click sends instantly ─────────────
         st.markdown("**Try asking:**")
         suggestions = [
             "What are the key insights from this data?",
@@ -226,21 +238,13 @@ if st.session_state.df is not None:
         ]
         cols = st.columns(4)
         for i, (col, sug) in enumerate(zip(cols, suggestions)):
-    with col:
-        if st.button(sug, key=f"sug_{i}", use_container_width=True):
-            st.session_state.messages.append({"role": "user", "content": sug})
-            api_messages = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
-            with st.spinner("🌿 Analysing..."):
-                try:
-                    response = call_groq(api_messages, st.session_state.df_summary, API_KEY)
-                    st.session_state.messages.append({"role": "assistant", "content": response})
-                except Exception as e:
-                    st.error(f"Error: {e}")
-            st.rerun()
+            with col:
+                if st.button(sug, key=f"sug_{i}", use_container_width=True):
+                    send_question(sug)
 
         st.markdown("---")
 
-        # Chat history
+        # ── Chat history ───────────────────────────────────────────────
         for msg in st.session_state.messages:
             if msg["role"] == "user":
                 st.markdown(f'<div class="msg-user">{msg["content"]}</div>', unsafe_allow_html=True)
@@ -253,26 +257,15 @@ if st.session_state.df is not None:
                         st.pyplot(fig, use_container_width=True)
                         plt.close()
 
-        pending = st.session_state.get("pending_question", "")
+        # ── Text input + Send ──────────────────────────────────────────
         question = st.text_input(
             "Ask anything about your data...",
-            value=pending,
             placeholder="e.g. What are the top 5 categories by revenue?",
             key="chat_input"
         )
-        if pending:
-            st.session_state.pending_question = ""
 
         if st.button("Send →") and question.strip():
-            st.session_state.messages.append({"role": "user", "content": question.strip()})
-            api_messages = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
-            with st.spinner("🌿 Analysing..."):
-                try:
-                    response = call_groq(api_messages, st.session_state.df_summary, API_KEY)
-                    st.session_state.messages.append({"role": "assistant", "content": response})
-                except Exception as e:
-                    st.error(f"Error: {e}")
-            st.rerun()
+            send_question(question.strip())
 
         if st.session_state.messages:
             if st.button("Clear chat"):
