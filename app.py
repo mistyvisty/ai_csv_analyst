@@ -244,7 +244,7 @@ def build_df_summary(df):
     summary["sample"] = df.head(5).to_dict(orient="records")
     return summary
 
-# ── Helper: call Anthropic API ─────────────────────────────────────────
+# ── Helper: call Groq API ─────────────────────────────────────────
 def call_claude(messages_history, df_summary, user_question, api_key):
     system_prompt = f"""You are an expert data analyst AI assistant. The user has uploaded a CSV dataset.
 
@@ -254,14 +254,12 @@ DATASET SUMMARY:
 Your job:
 1. Answer questions about this data clearly and insightfully
 2. Point out interesting patterns, anomalies, or business insights
-3. When asked to "show a chart" or "visualize", respond with a JSON block describing what chart to make:
-   ```chart
-   {{"type": "bar"|"line"|"scatter"|"hist"|"box", "x": "column_name", "y": "column_name_or_null", "title": "Chart title", "hue": "column_name_or_null"}}
-   ```
-4. Be concise but insightful — like a senior analyst explaining to a business stakeholder
+3. When asked to show a chart or visualize, respond with a JSON block describing what chart to make:
+   chart_spec: {{"type": "bar or line or scatter or hist or box", "x": "column_name", "y": "column_name_or_null", "title": "Chart title", "hue": "column_name_or_null"}}
+4. Be concise but insightful like a senior analyst explaining to a business stakeholder
 5. Use bullet points for lists of insights
-6. When you spot something interesting, lead with the insight, then explain it
-7. Format numbers clearly (e.g. ₹1.2M, 32.4%, etc.)
+6. When you spot something interesting, lead with the insight then explain it
+7. Format numbers clearly
 
 RULES:
 - Only use columns that actually exist in the dataset
@@ -269,21 +267,22 @@ RULES:
 - If you cannot answer from the data, say so clearly"""
 
     payload = {
-        "model": "claude-sonnet-4-20250514",
+        "model": "llama-3.1-8b-instant",
         "max_tokens": 1000,
-        "system": system_prompt,
-        "messages": messages_history
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            *messages_history
+        ]
     }
     headers = {
         "Content-Type": "application/json",
-        "x-api-key": api_key,
-        "anthropic-version": "2023-06-01"
+        "Authorization": f"Bearer {api_key}"
     }
-    resp = requests.post("https://api.anthropic.com/v1/messages", json=payload, headers=headers, timeout=30)
+    resp = requests.post("https://api.groq.com/openai/v1/chat/completions", json=payload, headers=headers, timeout=30)
     if resp.status_code != 200:
         raise Exception(f"API error {resp.status_code}: {resp.text[:300]}")
     data = resp.json()
-    return data["content"][0]["text"]
+    return data["choices"][0]["message"]["content"]
 
 # ── Helper: render chart from JSON instruction ─────────────────────────
 def render_chart(df, chart_json):
@@ -366,9 +365,9 @@ st.markdown("""
 # ── Sidebar: API key ───────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### 🔑 API Key")
-    api_key = st.text_input("Anthropic API Key", type="password",
+    api_key = st.text_input("Groq API Key", type="password",
                              value=st.session_state.api_key,
-                             placeholder="sk-ant-...")
+                             placeholder="gsk_...")
     if api_key:
         st.session_state.api_key = api_key
         st.success("Key saved ✓")
@@ -415,7 +414,7 @@ if st.session_state.df is not None:
     # ── TAB 1: Chat ─────────────────────────────────────────────────────
     with tab1:
         if not st.session_state.api_key:
-            st.info("👈 Add your Anthropic API key in the sidebar to start chatting")
+            st.info("👈 Add your Groq API key in the sidebar to start chatting")
         else:
             # Suggested questions
             st.markdown("**Try asking:**")
