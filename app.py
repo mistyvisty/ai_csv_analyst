@@ -44,7 +44,6 @@ html,body,[class*="css"],.stApp { background-color:var(--cream)!important; font-
 </style>
 """, unsafe_allow_html=True)
 
-# ── API key from secrets ───────────────────────────────────────────────
 def get_api_key():
     try:
         return st.secrets["GROQ_API_KEY"]
@@ -53,7 +52,6 @@ def get_api_key():
 
 API_KEY = get_api_key()
 
-# ── Session state ──────────────────────────────────────────────────────
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "df" not in st.session_state:
@@ -61,7 +59,6 @@ if "df" not in st.session_state:
 if "df_summary" not in st.session_state:
     st.session_state.df_summary = None
 
-# ── Build data summary ─────────────────────────────────────────────────
 def build_df_summary(df):
     summary = {}
     summary["shape"] = {"rows": int(df.shape[0]), "cols": int(df.shape[1])}
@@ -87,7 +84,6 @@ def build_df_summary(df):
     summary["sample"] = df.head(5).to_dict(orient="records")
     return summary
 
-# ── Call Groq ──────────────────────────────────────────────────────────
 def call_groq(messages_history, df_summary, api_key):
     system_prompt = f"""You are an expert data analyst AI. The user uploaded a CSV dataset.
 
@@ -115,16 +111,17 @@ Your job:
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_key}"
     }
-    resp = requests.post(
-        "https://api.groqcloud.com/openai/v1/chat/completions",
-        json=payload, headers=headers, timeout=30
-    )
+
+    # ── DEBUG: show exactly what URL and status we get ──
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    st.write(f"🔧 DEBUG — calling: `{url}`")
+    resp = requests.post(url, json=payload, headers=headers, timeout=30)
+    st.write(f"🔧 DEBUG — status: `{resp.status_code}`")
     if resp.status_code != 200:
+        st.write(f"🔧 DEBUG — error body: `{resp.text[:500]}`")
         raise Exception(f"API error {resp.status_code}: {resp.text[:300]}")
     return resp.json()["choices"][0]["message"]["content"]
 
-# ── Helper: send a question ────────────────────────────────────────────
-# FIX: st.rerun() is now OUTSIDE the spinner so the response is saved first
 def send_question(question):
     st.session_state.messages.append({"role": "user", "content": question})
     api_messages = [{"role": m["role"], "content": m["content"]}
@@ -138,9 +135,8 @@ def send_question(question):
                 "role": "assistant",
                 "content": f"⚠️ Error: {e}"
             })
-    st.rerun()  # ← moved outside the spinner block
+    st.rerun()
 
-# ── Render chart ───────────────────────────────────────────────────────
 def render_chart(df, chart_json_str):
     try:
         spec = json.loads(chart_json_str)
@@ -198,11 +194,13 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-if not API_KEY:
-    st.error("⚠️ No API key found. Please add GROQ_API_KEY to your Streamlit secrets.")
+# ── DEBUG: show key status at top ──────────────────────────────────────
+if API_KEY:
+    st.success(f"✅ API key loaded — starts with: `{API_KEY[:8]}...`")
+else:
+    st.error("❌ GROQ_API_KEY not found in secrets!")
     st.stop()
 
-# File upload
 uploaded = st.file_uploader("Drop your CSV here", type=["csv"], label_visibility="collapsed")
 
 if uploaded:
