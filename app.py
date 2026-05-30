@@ -41,7 +41,7 @@ html,body,[class*="css"],.stApp { background-color:var(--cream)!important; font-
 </style>
 """, unsafe_allow_html=True)
 
-# Session state
+# ── Session state ──────────────────────────────────────────────────────
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "df" not in st.session_state:
@@ -49,6 +49,7 @@ if "df" not in st.session_state:
 if "df_summary" not in st.session_state:
     st.session_state.df_summary = None
 
+# ── API key ────────────────────────────────────────────────────────────
 def get_api_key():
     try:
         return st.secrets["GROQ_API_KEY"]
@@ -57,6 +58,7 @@ def get_api_key():
 
 API_KEY = get_api_key()
 
+# ── Build summary ──────────────────────────────────────────────────────
 def build_df_summary(df):
     summary = {
         "shape": {"rows": int(df.shape[0]), "cols": int(df.shape[1])},
@@ -83,7 +85,8 @@ def build_df_summary(df):
         }
     return summary
 
-def call_groq(messages_history, df_summary, api_key):
+# ── Call Groq ──────────────────────────────────────────────────────────
+def call_groq(api_key, df_summary, messages):
     system_prompt = f"""You are an expert data analyst AI. The user uploaded a CSV dataset.
 
 DATASET SUMMARY:
@@ -97,7 +100,7 @@ Rules:
 ```
 Supported types: bar, hist, scatter, line
 3. Use bullet points for multiple insights. Be concise.
-4. NEVER make up data or use columns that don't exist."""
+4. NEVER make up data or use columns that do not exist."""
 
     resp = requests.post(
         "https://api.groq.com/openai/v1/chat/completions",
@@ -105,7 +108,7 @@ Supported types: bar, hist, scatter, line
         json={
             "model": "llama-3.1-8b-instant",
             "max_tokens": 1000,
-            "messages": [{"role": "system", "content": system_prompt}, *messages_history],
+            "messages": [{"role": "system", "content": system_prompt}] + messages,
         },
         timeout=30,
     )
@@ -113,12 +116,14 @@ Supported types: bar, hist, scatter, line
         raise Exception(f"Groq API error {resp.status_code}: {resp.text[:300]}")
     return resp.json()["choices"][0]["message"]["content"]
 
+# ── Parse chart blocks ─────────────────────────────────────────────────
 def parse_response(text):
     chart_pattern = r"```chart\s*([\s\S]*?)```"
     charts = re.findall(chart_pattern, text)
     clean = re.sub(chart_pattern, "\n📊 *[Chart below]*\n", text)
     return clean, charts
 
+# ── Render chart ───────────────────────────────────────────────────────
 def render_chart(df, chart_json_str):
     try:
         spec = json.loads(chart_json_str.strip())
@@ -158,15 +163,15 @@ def render_chart(df, chart_json_str):
     except Exception:
         return None
 
-def process_question(question):
-    """Add question to history, call API, add response."""
-    st.session_state.messages.append({"role": "user", "content": question})
-    api_msgs = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
-    try:
-        response = call_groq(api_msgs, st.session_state.df_summary, API_KEY)
-    except Exception as e:
-        response = f"⚠️ Error: {e}"
-    st.session_state.messages.append({"role": "assistant", "content": response})
+# ── Display one AI message ─────────────────────────────────────────────
+def show_ai_message(df, content):
+    clean_text, charts = parse_response(content)
+    st.markdown(clean_text)
+    for chart_json in charts:
+        fig = render_chart(df, chart_json)
+        if fig:
+            st.pyplot(fig, use_container_width=True)
+            plt.close()
 
 # ══════════════════════════════════════════
 # UI
@@ -187,9 +192,9 @@ uploaded = st.file_uploader("Drop your CSV here", type=["csv"], label_visibility
 
 if uploaded:
     try:
-        df = pd.read_csv(uploaded, encoding='latin1')
-        st.session_state.df = df
-        st.session_state.df_summary = build_df_summary(df)
+        df_new = pd.read_csv(uploaded, encoding='latin1')
+        st.session_state.df = df_new
+        st.session_state.df_summary = build_df_summary(df_new)
         st.session_state.messages = []
     except Exception as e:
         st.error(f"Could not read CSV: {e}")
@@ -212,7 +217,9 @@ if st.session_state.df is not None:
     st.markdown("<br>", unsafe_allow_html=True)
     tab1, tab2, tab3 = st.tabs(["💬 Chat with your data", "🔍 Data preview", "📊 Quick charts"])
 
+    # ── TAB 1: CHAT ────────────────────────────────────────────────────
     with tab1:
+
         # Suggestion buttons
         st.markdown("**Try asking:**")
         suggestions = [
@@ -222,52 +229,57 @@ if st.session_state.df is not None:
             "Show me a chart of the top categories",
         ]
         bcols = st.columns(4)
-        for i, (col, sug) in enumerate(zip(bcols, suggestions)):
-            with col:
+        for i, (bcol, sug) in enumerate(zip(bcols, suggestions)):
+            with bcol:
                 if st.button(sug, key=f"sug_{i}", use_container_width=True):
+                    # Add user message
+                    st.session_state.messages.append({"role": "user", "content": sug})
+                    # Call API
                     with st.spinner("🌿 Analysing..."):
-                        process_question(sug)
+                        try:
+                            reply = call_groq(API_KEY, st.session_state.df_summary, st.session_state.messages)
+                        except Exception as e:
+                            reply = f"⚠️ Error: {e}"
+                    # Add assistant message
+                    st.session_state.messages.append({"role": "assistant", "content": reply})
+                    st.rerun()
 
         st.markdown("---")
 
-        # Chat history
+        # Render full chat history
         for msg in st.session_state.messages:
             if msg["role"] == "user":
                 with st.chat_message("user"):
-                    st.write(msg["content"])
+                    st.markdown(msg["content"])
             else:
                 with st.chat_message("assistant"):
-                    clean_text, charts = parse_response(msg["content"])
-                    st.write(clean_text)
-                    for chart_json in charts:
-                        fig = render_chart(df, chart_json)
-                        if fig:
-                            st.pyplot(fig, use_container_width=True)
-                            plt.close()
+                    show_ai_message(df, msg["content"])
 
-        # Chat input — native Streamlit widget, works perfectly
+        # Chat input box at bottom
         user_input = st.chat_input("Ask anything about your data...")
         if user_input:
+            # Show user message immediately
             with st.chat_message("user"):
-                st.write(user_input)
+                st.markdown(user_input)
+            # Add to history
+            st.session_state.messages.append({"role": "user", "content": user_input})
+            # Call API and show response
             with st.chat_message("assistant"):
                 with st.spinner("🌿 Analysing..."):
-                    process_question(user_input)
-                # Show last response
-                last = st.session_state.messages[-1]["content"]
-                clean_text, charts = parse_response(last)
-                st.write(clean_text)
-                for chart_json in charts:
-                    fig = render_chart(df, chart_json)
-                    if fig:
-                        st.pyplot(fig, use_container_width=True)
-                        plt.close()
+                    try:
+                        reply = call_groq(API_KEY, st.session_state.df_summary, st.session_state.messages)
+                    except Exception as e:
+                        reply = f"⚠️ Error: {e}"
+                st.session_state.messages.append({"role": "assistant", "content": reply})
+                show_ai_message(df, reply)
 
+        # Clear button
         if st.session_state.messages:
             if st.button("🗑 Clear chat"):
                 st.session_state.messages = []
                 st.rerun()
 
+    # ── TAB 2: DATA PREVIEW ────────────────────────────────────────────
     with tab2:
         st.markdown('<div class="section-label">Dataset Preview</div>', unsafe_allow_html=True)
         st.dataframe(df.head(50), use_container_width=True, height=380)
@@ -281,6 +293,7 @@ if st.session_state.df is not None:
         })
         st.dataframe(info_df, use_container_width=True, hide_index=True)
 
+    # ── TAB 3: QUICK CHARTS ────────────────────────────────────────────
     with tab3:
         st.markdown('<div class="section-label">Explore visually</div>', unsafe_allow_html=True)
         num_columns = list(df.select_dtypes(include="number").columns)
