@@ -192,7 +192,7 @@ uploaded = st.file_uploader("Drop your CSV here", type=["csv"], label_visibility
 
 if uploaded:
     try:
-        df = pd.read_csv(uploaded)
+        df = pd.read_csv(uploaded, encoding='latin1')
         st.session_state.df = df
         st.session_state.df_summary = build_df_summary(df)
     except Exception as e:
